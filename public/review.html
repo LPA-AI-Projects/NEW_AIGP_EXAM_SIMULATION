@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review Your Answers — AIGP Exam Simulation</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script src="/common.js"></script>
+<script>injectTopbar('AIGP Exam Simulation');</script>
+<div class="wrap" id="app" style="max-width:760px"></div>
+<footer class="foot">Unofficial practice tool — Learners Point Academy — not affiliated with or endorsed by IAPP.</footer>
+<script>
+const DOMAIN_META = {
+  I:{short:'Domain I', cls:'dom-I'}, II:{short:'Domain II', cls:'dom-II'},
+  III:{short:'Domain III', cls:'dom-III'}, IV:{short:'Domain IV', cls:'dom-IV'}
+};
+const app = document.getElementById('app');
+function el(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!==undefined) e.innerHTML=html; return e; }
+
+let allItems = [];
+let missedOnly = false;
+
+async function load() {
+  let me;
+  try { me = await api('/me'); } catch (ex) { if (ex.status===401) return location.href='/'; }
+  if (me.status !== 'completed') return location.href = (me.status === 'profile_set' ? '/mode-select' : '/exam');
+  let data;
+  try { data = await api('/exam/review'); } catch (ex) { app.innerHTML = '<div class="card">'+esc(ex.message)+'</div>'; return; }
+  allItems = data.items;
+  renderList();
+}
+
+function renderList() {
+  app.innerHTML = '';
+  const head = el('div','card');
+  head.innerHTML = '<div class="row between"><h1>Review Your Answers</h1><a class="btn btn-ghost btn-sm" href="/results">\u2190 Back to Results</a></div>'+
+    '<div class="row" style="margin-top:8px">'+
+    '<button class="chip'+(!missedOnly?' sel':'')+'" id="filterAll">All '+allItems.length+'</button>'+
+    '<button class="chip'+(missedOnly?' sel':'')+'" id="filterMissed">Missed only</button>'+
+    '</div>';
+  app.appendChild(head);
+
+  const listCard = el('div','card');
+  const visible = missedOnly ? allItems.filter(it => !it.isCorrect) : allItems;
+  const rows = visible.map(it => {
+    const dm = DOMAIN_META[it.domain];
+    const statusPill = it.isCorrect ? '<span class="pill pill-good">\u2713 Correct</span>' :
+      (it.answered ? '<span class="pill pill-bad">\u2717 Incorrect</span>' : '<span class="pill pill-orange">Not answered</span>');
+    const stemShort = it.stem.length > 90 ? it.stem.slice(0,90)+'\u2026' : it.stem;
+    return '<div class="opt" data-jump="'+it.index+'" style="cursor:pointer">'+
+      '<div class="mark" style="background:'+(it.isCorrect?'var(--good)':(it.answered?'var(--danger)':'var(--muted)'))+';border-color:transparent;color:#fff">'+(it.index+1)+'</div>'+
+      '<div class="lettertext" style="flex:1"><span class="badge-domain '+dm.cls+'" style="margin-right:8px">Domain '+it.domain+'</span>'+esc(stemShort)+'</div>'+
+      statusPill+'</div>';
+  }).join('');
+  listCard.innerHTML = rows || '<p class="muted">No missed questions \u2014 nice work.</p>';
+  listCard.querySelectorAll('[data-jump]').forEach(opt => {
+    opt.onclick = () => renderDetail(parseInt(opt.dataset.jump, 10));
+  });
+  app.appendChild(listCard);
+
+  document.getElementById('filterAll').onclick = () => { missedOnly = false; renderList(); };
+  document.getElementById('filterMissed').onclick = () => { missedOnly = true; renderList(); };
+}
+
+function renderDetail(idx) {
+  const it = allItems[idx];
+  const dm = DOMAIN_META[it.domain];
+  app.innerHTML = '';
+
+  const head = el('div','card');
+  head.innerHTML = '<div class="row between"><span class="badge-domain '+dm.cls+'">Domain '+it.domain+'</span>'+
+    '<span class="row" style="gap:10px"><span class="muted small">Question '+(idx+1)+' of '+allItems.length+'</span>'+
+    (it.isCorrect?'<span class="pill pill-good">\u2713 Correct</span>':(it.answered?'<span class="pill pill-bad">\u2717 Incorrect</span>':'<span class="pill pill-orange">Not answered</span>'))+'</span></div>';
+  app.appendChild(head);
+
+  const card = el('div','card');
+  if (it.scenarioText) { const sb = el('div','scenario-box'); sb.innerHTML = '<div class="lbl">Scenario</div>'+esc(it.scenarioText); card.appendChild(sb); }
+  const qb = el('div','question-block'); qb.innerHTML = '<div class="lbl">Question</div><h3>'+esc(it.stem)+'</h3>'; card.appendChild(qb);
+
+  if (it.type === 'order') {
+    const corrTxt = it.correct.map(l => it.options[l]).join(' \u2192 ');
+    const givTxt = it.given ? it.given.map(l => it.options[l]).join(' \u2192 ') : '(not answered)';
+    card.appendChild(el('p', null, '<strong>Your order:</strong> '+esc(givTxt)));
+    if (!it.isCorrect) card.appendChild(el('p', null, '<strong>Correct order:</strong> '+esc(corrTxt)));
+  } else {
+    Object.keys(it.options).forEach(letter => {
+      const isCorrectOpt = it.correct.indexOf(letter) > -1;
+      const wasGiven = it.given && it.given.indexOf(letter) > -1;
+      const cls = 'opt locked' + (isCorrectOpt ? ' correct' : (wasGiven ? ' wrong' : ''));
+      const opt = el('div', cls);
+      opt.innerHTML = '<div class="mark">'+(isCorrectOpt?'\u2713':(wasGiven?'\u2717':''))+'</div><div class="lettertext"><span class="letter">'+letter+'.</span>'+esc(it.options[letter])+'</div>';
+      card.appendChild(opt);
+    });
+  }
+  const fb = el('div','feedback-box '+(it.isCorrect?'good':'bad'));
+  fb.innerHTML = '<div class="title">'+(it.isCorrect?'\u2713 You got this right':'\u2717 Why this answer is correct')+'</div><p>'+esc(it.rationale)+'</p>';
+  card.appendChild(fb);
+  app.appendChild(card);
+
+  const nav = el('div','card row between');
+  const prevBtn = el('button','btn btn-ghost','\u2190 Previous'); prevBtn.disabled = idx===0;
+  prevBtn.onclick = () => renderDetail(idx-1);
+  const backBtn = el('button','btn btn-ghost','Back to List');
+  backBtn.onclick = renderList;
+  const nextBtn = el('button','btn btn-primary','Next \u2192'); nextBtn.disabled = idx===allItems.length-1;
+  nextBtn.onclick = () => renderDetail(idx+1);
+  nav.appendChild(prevBtn); nav.appendChild(backBtn); nav.appendChild(nextBtn);
+  app.appendChild(nav);
+}
+
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trainer Dashboard — AIGP Exam Simulation</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script src="/common.js"></script>
+<script>injectTopbar('Trainer Dashboard');</script>
+<div class="wrap" id="app"><div class="card"><div class="spinner"></div></div></div>
+<div id="modalRoot"></div>
+<footer class="foot">Unofficial practice tool — Learners Point Academy — not affiliated with or endorsed by IAPP.</footer>
+<script>
+const DOMAIN_META = {
+  I:{short:'Domain I', cls:'dom-I'}, II:{short:'Domain II', cls:'dom-II'},
+  III:{short:'Domain III', cls:'dom-III'}, IV:{short:'Domain IV', cls:'dom-IV'}
+};
+function badgePillClass(label) {
+  if (label === 'Gold') return 'pill-orange';
+  if (label === 'Silver') return 'pill-blue';
+  if (label === 'Bronze') return 'pill-orange';
+  return 'pill-bad'; // Keep Practicing
+}
+function modeLabel(p) {
+  if (p.mode === 'domain') return 'Domain Practice \u2014 Domain '+p.domain;
+  if (p.mode === 'drill') return 'Quick Drill';
+  if (p.mode === 'full') return 'Full Mock Exam';
+  return '\u2014';
+}
+const app = document.getElementById('app');
+const modalRoot = document.getElementById('modalRoot');
+let pollTimer = null;
+
+function el(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!==undefined) e.innerHTML=html; return e; }
+function closeModal(){ modalRoot.innerHTML=''; }
+function openModal(innerHtml){
+  modalRoot.innerHTML = '<div class="modal-bg" id="mbg"><div class="modal">'+innerHtml+'</div></div>';
+  document.getElementById('mbg').addEventListener('click', (e)=>{ if(e.target.id==='mbg') closeModal(); });
+}
+
+async function boot() {
+  let data;
+  try { data = await api('/trainer/participants'); }
+  catch (ex) { if (ex.status===401) return location.href='/'; app.innerHTML='<div class="card">'+esc(ex.message)+'</div>'; return; }
+  render(data);
+  clearTimeout(pollTimer);
+  pollTimer = setTimeout(boot, 4000);
+}
+
+function render(data) {
+  app.innerHTML = '';
+  const head = el('div','card');
+  head.innerHTML =
+    '<div class="row between">'+
+      '<div><h1>Trainer Dashboard</h1><p class="muted">Every learner chooses and starts their own practice session — this view just tracks them live.</p></div>'+
+      '<div class="row">'+
+        '<button class="btn btn-ghost btn-sm" id="btnKey">Answer Key</button>'+
+        '<a class="btn btn-ghost btn-sm" href="/api/trainer/report.pdf">Download Compiled PDF</a>'+
+        '<button class="btn btn-orange btn-sm" id="btnReset">Reset All Data</button>'+
+      '</div>'+
+    '</div>';
+  app.appendChild(head);
+
+  const completed = data.participants.filter(p=>p.status==='completed').length;
+  const stats = el('div','grid grid-4');
+  stats.innerHTML =
+    statCard(data.participants.length, 'Joined') +
+    statCard(data.participants.filter(p=>p.status==='in_progress').length, 'In progress') +
+    statCard(completed, 'Completed') +
+    statCard(completed ? Math.round(data.participants.filter(p=>p.status==='completed').reduce((a,p)=>a+p.pct,0)/completed)+'%' : '\u2014', 'Avg score');
+  app.appendChild(stats);
+
+  const tableCard = el('div','card');
+  let rows = data.participants.map(p => {
+    const statusPill = p.status==='completed' ? '<span class="pill pill-good">Completed</span>' :
+      p.status==='in_progress' ? '<span class="pill pill-blue">In progress</span>' : '<span class="pill pill-orange">Not started</span>';
+    const prog = p.status==='completed' ? '100%' : p.status==='in_progress' ? p.progressPct+'% (Q'+(p.cur_index+1)+')' : '\u2014';
+    return '<tr><td>'+esc(p.name)+'</td><td class="muted small">'+esc(p.email)+'</td><td class="small">'+esc(modeLabel(p))+'</td><td>'+statusPill+'</td>'+
+      '<td>'+prog+'</td><td>'+(p.status==='completed' ? p.score+'/'+p.total+' ('+p.pct+'%)' : '\u2014')+'</td>'+
+      '<td>'+(p.badge ? '<span class="pill '+badgePillClass(p.badge)+'">'+p.badge+'</span>' : '\u2014')+'</td>'+
+      '<td><button class="btn btn-ghost btn-sm" data-view="'+p.id+'">View</button></td></tr>';
+  }).join('');
+  tableCard.innerHTML = '<h2>Participants</h2><table class="tbl"><tr><th>Name</th><th>Email</th><th>Mode</th><th>Status</th><th>Progress</th><th>Score</th><th>Badge</th><th></th></tr>'+
+    (rows || '<tr><td colspan="8" class="muted">No participants yet.</td></tr>')+'</table>'+
+    '<p class="muted small" style="margin-top:10px">Refreshes automatically every few seconds.</p>';
+  app.appendChild(tableCard);
+
+  document.getElementById('btnKey').onclick = showAnswerKey;
+  document.getElementById('btnReset').onclick = askReset;
+  tableCard.querySelectorAll('[data-view]').forEach(b => b.onclick = () => showParticipant(b.dataset.view));
+}
+function statCard(value, label) {
+  return '<div class="card" style="text-align:center;padding:16px"><div style="font-size:26px;font-weight:bold;color:var(--teal)">'+value+'</div><div class="muted small">'+label+'</div></div>';
+}
+
+function askReset() {
+  clearTimeout(pollTimer);
+  openModal(
+    '<h2>Reset all data?</h2><p class="muted">This deletes every participant\u2019s record \u2014 names, scores, and answers. Download the compiled PDF first if you want to keep a copy. This can\u2019t be undone.</p>'+
+    '<div class="row" style="margin-top:16px"><button class="btn btn-orange" id="confirmReset">Yes, delete everything</button><button class="btn btn-ghost" id="cancelReset">Cancel</button></div>'+
+    '<p class="error hidden" id="resetErr" style="margin-top:10px"></p>'
+  );
+  document.getElementById('cancelReset').onclick = () => { closeModal(); boot(); };
+  document.getElementById('confirmReset').onclick = async () => {
+    const btn = document.getElementById('confirmReset'); btn.disabled = true; btn.textContent = 'Deleting\u2026';
+    try { await api('/trainer/reset', { method:'POST' }); closeModal(); boot(); }
+    catch (ex) {
+      const e = document.getElementById('resetErr'); e.textContent = 'Could not finish (' + ex.message + ').'; e.classList.remove('hidden');
+      btn.disabled = false; btn.textContent = 'Yes, delete everything';
+    }
+  };
+}
+
+async function showAnswerKey() {
+  clearTimeout(pollTimer);
+  const data = await api('/trainer/answerkey');
+  let body = data.domains.map(d => {
+    const dm = DOMAIN_META[d.domain];
+    const items = d.questions.map(q => {
+      const opts = Object.keys(q.options).map(l => (q.correct.indexOf(l)>-1 ? '<strong style="color:var(--good)">'+l+'. '+esc(q.options[l])+' \u2713</strong>' : l+'. '+esc(q.options[l]))).join('<br>');
+      return '<div style="padding:10px 0;border-bottom:1px solid var(--line)">'+
+        (q.scenarioText ? '<div class="scenario-box" style="margin:6px 0">'+esc(q.scenarioText)+'</div>' : '')+
+        '<div style="font-weight:bold;font-size:13px;margin-bottom:4px">'+esc(q.stem)+'</div>'+
+        '<div class="small">'+opts+'</div>'+
+        '<div class="muted small" style="margin-top:4px">'+esc(q.rationale)+'</div></div>';
+    }).join('');
+    return '<h3 style="margin-top:16px"><span class="badge-domain '+dm.cls+'">'+dm.short+'</span> '+d.meta.name+'</h3>'+items;
+  }).join('');
+  openModal('<div class="row between"><h2>Answer Key \u2014 Full Question Bank</h2><button class="btn btn-ghost btn-sm" onclick="closeModal();boot()">Close</button></div>'+
+    '<p class="muted small">All '+data.total+' questions across the bank, with correct answers and rationale.</p>'+body);
+}
+
+async function showParticipant(id) {
+  clearTimeout(pollTimer);
+  const data = await api('/trainer/participant/'+id);
+  renderParticipantModal(id, data);
+}
+function renderParticipantModal(id, data) {
+  const p = data.participant;
+  let rows = data.items.map(it => {
+    const dm = DOMAIN_META[it.domain];
+    const statusLabel = it.effectiveCorrect===true ? '<span class="pill pill-good">Correct</span>' :
+      it.effectiveCorrect===false ? '<span class="pill pill-bad">Incorrect</span>' : '<span class="pill pill-orange">Not answered</span>';
+    const overrideNote = it.overrideCorrect!==null && it.overrideCorrect!==undefined ? '<div class="small" style="color:var(--orangeD)">Trainer override applied</div>' : '';
+    const givenTxt = it.given ? it.given.map(l=>l+'. '+(it.options[l]||'')).join('; ') : '(not answered)';
+    return '<div style="padding:10px 0;border-bottom:1px solid var(--line)">'+
+      '<div class="row between"><span class="badge-domain '+dm.cls+'">'+dm.short+'</span>'+statusLabel+'</div>'+
+      '<div style="margin:6px 0;font-weight:bold;font-size:13.5px">Q'+it.index+'. '+esc(it.stem)+'</div>'+
+      '<div class="small">Answer given: '+esc(givenTxt)+'</div>'+
+      overrideNote+
+      (it.answered ? '<div class="row" style="margin-top:6px">'+
+        '<button class="btn btn-ghost btn-sm" data-ov="true" data-q="'+it.id+'">Mark correct</button>'+
+        '<button class="btn btn-ghost btn-sm" data-ov="false" data-q="'+it.id+'">Mark incorrect</button>'+
+        (it.overrideCorrect!==null && it.overrideCorrect!==undefined ? '<button class="btn btn-ghost btn-sm" data-ov="clear" data-q="'+it.id+'">Clear override</button>' : '')+
+      '</div>' : '')+
+    '</div>';
+  }).join('');
+
+  openModal(
+    '<div class="row between"><h2>'+esc(p.name)+'</h2><button class="btn btn-ghost btn-sm" onclick="closeModal();boot()">Close</button></div>'+
+    '<p class="muted">'+esc(p.email)+' \u2014 '+esc(modeLabel(p))+' \u2014 '+p.score+'/'+p.total+' ('+p.pct+'%) \u2014 <span class="pill '+badgePillClass(p.badge.label)+'">'+p.badge.label+'</span></p>'+
+    '<div class="row" style="margin-bottom:14px">'+
+      '<a class="btn btn-ghost btn-sm" href="/api/trainer/participant/'+id+'/report.pdf">Download PDF</a>'+
+      '<button class="btn btn-primary btn-sm" id="btnResend">Send Updated Report by Email</button>'+
+    '</div>'+
+    '<div id="resendMsg" class="small muted"></div>'+
+    rows
+  );
+  document.getElementById('btnResend').onclick = async () => {
+    const msg = document.getElementById('resendMsg');
+    msg.textContent = 'Sending\u2026';
+    try {
+      const r = await api('/trainer/participant/'+id+'/resend', { method:'POST' });
+      msg.textContent = r.sent ? 'Sent to '+esc(p.email)+'.' : 'Email is not configured on this deployment yet (' + (r.reason||'') + ').';
+    } catch (ex) { msg.textContent = ex.message; }
+  };
+  modalRoot.querySelectorAll('[data-ov]').forEach(b => {
+    b.onclick = async () => {
+      const v = b.dataset.ov === 'true' ? true : b.dataset.ov === 'false' ? false : null;
+      await api('/trainer/participant/'+id+'/override', { method:'POST', body:{ question_id: b.dataset.q, correct: v } });
+      const fresh = await api('/trainer/participant/'+id);
+      renderParticipantModal(id, fresh);
+    };
+  });
+}
+
+boot();
+</script>
+</body>
+</html>

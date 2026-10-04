@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIGP Exam Simulation — Learners Point Academy</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script src="/common.js"></script>
+<div class="wrap-narrow" style="padding-top:40px">
+  <div style="text-align:center;margin-bottom:26px">
+    <img src="/assets/logo.png" alt="Learners Point" style="height:44px">
+    <h1 style="margin-top:16px">AIGP Exam Simulation</h1>
+    <p class="muted">Artificial Intelligence Governance Professional — practice simulation</p>
+  </div>
+
+  <div class="card">
+    <h2>Learner Login</h2>
+    <p class="muted">No account needed. Enter your name and email to join.</p>
+    <form id="learnerForm">
+      <div class="field"><label>Full name</label><input type="text" id="lname" required></div>
+      <div class="field"><label>Email address</label><input type="email" id="lemail" required></div>
+      <button class="btn btn-primary btn-block" type="submit">Enter Simulation</button>
+      <p class="error hidden" id="learnerErr"></p>
+    </form>
+  </div>
+
+  <div class="card">
+    <h2>Trainer / Admin Login</h2>
+    <p class="muted">For authorized trainers only.</p>
+    <form id="trainerForm">
+      <div class="field"><label>Access code</label><input type="password" id="tcode" inputmode="numeric" required></div>
+      <button class="btn btn-ghost btn-block" type="submit">Trainer Sign In</button>
+      <p class="error hidden" id="trainerErr"></p>
+    </form>
+  </div>
+</div>
+<footer class="foot">Unofficial practice tool — Learners Point Academy — not affiliated with or endorsed by IAPP.</footer>
+<script>
+document.getElementById('learnerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('learnerErr'); err.classList.add('hidden');
+  const name = document.getElementById('lname').value.trim();
+  const email = document.getElementById('lemail').value.trim();
+  try {
+    await api('/learner/join', { method: 'POST', body: { name, email } });
+    location.href = '/mode-select';
+  } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+});
+document.getElementById('trainerForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('trainerErr'); err.classList.add('hidden');
+  const code = document.getElementById('tcode').value.trim();
+  try {
+    await api('/trainer/login', { method: 'POST', body: { code } });
+    location.href = '/dashboard';
+  } catch (ex) { err.textContent = ex.message; err.classList.remove('hidden'); }
+});
+</script>
+</body>
+</html>

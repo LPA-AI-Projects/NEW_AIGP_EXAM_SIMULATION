@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIGP Exam Simulation</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script src="/common.js"></script>
+<script>injectTopbar('AIGP Exam Simulation');</script>
+<div class="wrap" id="app" style="max-width:760px"></div>
+<footer class="foot">Unofficial practice tool — Learners Point Academy — not affiliated with or endorsed by IAPP.</footer>
+<script>
+const DOMAIN_META = {
+  I:{short:'Domain I', cls:'dom-I'}, II:{short:'Domain II', cls:'dom-II'},
+  III:{short:'Domain III', cls:'dom-III'}, IV:{short:'Domain IV', cls:'dom-IV'}
+};
+const DOM_ORDER = ['I','II','III','IV'];
+let cur = null;        // current question payload from the server
+let selection = [];    // for single: [letter]; multi: [letters...]; order: [letters in order]
+let examStartedAt = null;
+let timerHandle = null;
+let navExpanded = false;
+let progressCache = null; // {items:[{index,domain,answered}], total}
+const app = document.getElementById('app');
+
+function el(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!==undefined) e.innerHTML=html; return e; }
+function fmtElapsed(sec){ const m=Math.floor(sec/60), s=sec%60; return m+':'+(s<10?'0':'')+s; }
+function startTimer(){
+  clearInterval(timerHandle);
+  timerHandle = setInterval(() => {
+    const t = document.getElementById('elapsedTime');
+    if (t) t.textContent = fmtElapsed(Math.floor((Date.now()-examStartedAt)/1000));
+  }, 1000);
+}
+function shuffle(a){ a=a.slice(); for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+
+async function refreshProgress(){
+  try { progressCache = await api('/exam/progress'); } catch (ex) { /* non-fatal */ }
+}
+function answeredCount(){
+  if (!progressCache) return 0;
+  return progressCache.items.filter(it => it.answered).length;
+}
+
+async function loadQuestion(idx) {
+  selection = [];
+  let data;
+  try { data = await api('/exam/question/' + idx); }
+  catch (ex) {
+    if (ex.status === 401) return location.href = '/';
+    if (ex.status === 409) return location.href = '/mode-select';
+    app.innerHTML = '<div class="card"><h2>Could not load that question</h2><p class="muted">'+esc(ex.message)+'</p></div>';
+    return;
+  }
+  cur = data;
+  if (!examStartedAt) { examStartedAt = data.startedAt ? new Date(data.startedAt).getTime() : Date.now(); startTimer(); }
+  if (!progressCache) await refreshProgress();
+  if (cur.question.type === 'order') selection = cur.answered ? cur.yourAnswer.given.slice() : shuffle(Object.keys(cur.question.options));
+  render();
+}
+
+function render() {
+  const q = cur.question;
+  const dm = DOMAIN_META[q.domain];
+  app.innerHTML = '';
+
+  const head = el('div','card');
+  const pct = progressCache ? Math.round(answeredCount()/progressCache.total*100) : 0;
+  head.innerHTML =
+    '<div class="row between"><span class="badge-domain '+dm.cls+'">'+dm.short+'</span>'+
+    '<span class="row" style="gap:14px"><span class="muted small">Question '+(cur.index+1)+' of '+cur.total+'</span>'+
+    '<span class="pill pill-teal">\u23F1 <span id="elapsedTime">'+fmtElapsed(Math.floor((Date.now()-examStartedAt)/1000))+'</span></span></span></div>'+
+    '<div class="progress-bar" style="margin-top:10px"><div class="progress-fill" style="width:'+pct+'%"></div></div>'+
+    '<p class="muted small" style="margin-top:6px">'+answeredCount()+' of '+cur.total+' answered</p>';
+  app.appendChild(head);
+
+  const card = el('div','card');
+  if (q.scenarioText) {
+    const sb = el('div','scenario-box'); sb.innerHTML='<div class="lbl">Scenario</div>'+esc(q.scenarioText); card.appendChild(sb);
+  }
+  const qb = el('div','question-block'); qb.innerHTML = '<div class="lbl">Question</div><h3>'+esc(q.stem)+'</h3>'; card.appendChild(qb);
+
+  if (q.type === 'multi' && !cur.answered) {
+    card.appendChild(el('div','pill pill-orange', 'Select exactly '+q.selectCount+'. No partial credit.'));
+    card.appendChild(document.createElement('div')).style.height='10px';
+  }
+
+  if (q.type === 'order') {
+    if (!cur.answered) card.appendChild(el('div','pill pill-blue','Put these steps in the correct order using the arrows.'));
+    const list = el('ul'); list.style.cssText='list-style:none;margin:12px 0 0;padding:0';
+    function renderOrder(){
+      list.innerHTML='';
+      selection.forEach((letter,i)=>{
+        const li = el('li','opt'); li.style.cursor='default';
+        li.innerHTML = '<div class="mark" style="background:var(--teal);border-color:var(--teal)">'+(i+1)+'</div>'+
+          '<div class="lettertext" style="flex:1">'+esc(q.options[letter])+'</div>'+
+          (cur.answered ? '' : ('<div class="row" style="gap:4px"><button type="button" data-d="up" '+(i===0?'disabled':'')+' class="btn btn-ghost btn-sm">\u2191</button>'+
+          '<button type="button" data-d="down" '+(i===selection.length-1?'disabled':'')+' class="btn btn-ghost btn-sm">\u2193</button></div>'));
+        if (!cur.answered) {
+          li.querySelector('[data-d="up"]').onclick=(e)=>{e.stopPropagation(); if(i>0){[selection[i-1],selection[i]]=[selection[i],selection[i-1]]; renderOrder();}};
+          li.querySelector('[data-d="down"]').onclick=(e)=>{e.stopPropagation(); if(i<selection.length-1){[selection[i+1],selection[i]]=[selection[i],selection[i+1]]; renderOrder();}};
+        }
+        list.appendChild(li);
+      });
+    }
+    renderOrder();
+    card.appendChild(list);
+    if (cur.answered && !cur.yourAnswer.isCorrect) {
+      card.appendChild(el('p', null, '<strong>Correct order:</strong> '+esc(cur.correct.map(l => q.options[l]).join(' \u2192 '))));
+    }
+  } else if (q.type !== 'order') {
+    Object.keys(q.options).forEach(letter => {
+      const opt = el('div','opt'+(q.type==='multi'?' square':''));
+      opt.innerHTML = '<div class="mark"></div><div class="lettertext"><span class="letter">'+letter+'.</span>'+esc(q.options[letter])+'</div>';
+      opt.dataset.letter = letter;
+      if (cur.answered) {
+        opt.classList.add('locked');
+        if (cur.correct.indexOf(letter) > -1) opt.classList.add('correct');
+        else if (cur.yourAnswer.given.indexOf(letter) > -1) opt.classList.add('wrong');
+      } else {
+        opt.onclick = () => {
+          if (q.type === 'multi') {
+            const i = selection.indexOf(letter);
+            if (i>-1) selection.splice(i,1);
+            else if (selection.length < q.selectCount) selection.push(letter);
+          } else selection = [letter];
+          syncOptionMarks(card, q);
+        };
+      }
+      card.appendChild(opt);
+    });
+  }
+
+  if (cur.answered) {
+    const ok = cur.yourAnswer.isCorrect;
+    const fb = el('div','feedback-box '+(ok?'good':'bad'));
+    fb.innerHTML = '<div class="title">'+(ok?'\u2713 You answered this correctly':'\u2717 Why this answer is correct')+'</div>'+
+      (q.type!=='order' && !ok ? '<p><strong>Correct answer:</strong> '+esc(cur.correct.map(l=>l+'. '+q.options[l]).join('; '))+'</p>' : '')+
+      '<p style="margin-top:8px"><strong>Why:</strong> '+esc(cur.rationale)+'</p>';
+    card.appendChild(fb);
+  } else {
+    const actionRow = el('div','row'); actionRow.style.marginTop='14px';
+    const submitBtn = el('button','btn btn-primary','Submit Answer');
+    submitBtn.type = 'button';
+    submitBtn.onclick = (ev) => { ev.preventDefault(); submitAnswer(); };
+    actionRow.appendChild(submitBtn);
+    card.appendChild(actionRow);
+    const errSlot = el('p','error hidden'); errSlot.id = 'examErr'; card.appendChild(errSlot);
+    if (q.type !== 'order') syncOptionMarks(card, q);
+  }
+
+  app.appendChild(card);
+  appendNavControls();
+}
+
+function syncOptionMarks(card, q) {
+  card.querySelectorAll('.opt[data-letter]').forEach(opt => {
+    const letter = opt.dataset.letter;
+    const picked = selection.indexOf(letter) > -1;
+    opt.classList.toggle('picked', picked);
+    opt.classList.toggle('square', q.type==='multi');
+    opt.querySelector('.mark').textContent = picked ? '\u2713' : '';
+  });
+}
+
+function appendNavControls(){
+  const navRow = el('div','card row between');
+  const prevBtn = el('button','btn btn-ghost','\u2190 Previous'); prevBtn.disabled = cur.index===0;
+  prevBtn.onclick = () => loadQuestion(cur.index-1);
+  const nextBtn = el('button','btn btn-ghost','Next \u2192'); nextBtn.disabled = cur.index===cur.total-1;
+  nextBtn.onclick = () => loadQuestion(cur.index+1);
+  const finishBtn = el('button','btn btn-primary','Finish & See Results');
+  finishBtn.onclick = tryFinish;
+  navRow.appendChild(prevBtn); navRow.appendChild(finishBtn); navRow.appendChild(nextBtn);
+  app.appendChild(navRow);
+
+  const navCard = el('div','card');
+  const toggleBtn = el('button','btn btn-ghost btn-sm', (navExpanded?'\u25BE ':'\u25B8 ')+'Question Navigator ('+answeredCount()+'/'+cur.total+' answered)');
+  toggleBtn.onclick = () => { navExpanded = !navExpanded; render(); };
+  navCard.appendChild(toggleBtn);
+  if (navExpanded && progressCache) {
+    const grid = el('div'); grid.style.marginTop='12px';
+    DOM_ORDER.forEach(d => {
+      const idxs = progressCache.items.filter(it => it.domain===d);
+      if (!idxs.length) return;
+      const ansCount = idxs.filter(it => it.answered).length;
+      const sec = el('div'); sec.style.marginBottom='10px';
+      sec.appendChild(el('p','muted small', '<strong>Domain '+d+'</strong> \u00b7 '+ansCount+'/'+idxs.length+' answered'));
+      const btnWrap = el('div','row'); btnWrap.style.cssText='flex-wrap:wrap;gap:6px';
+      idxs.forEach(it => {
+        const isCur = it.index===cur.index;
+        const b = el('button', null, String(it.index+1));
+        b.style.cssText = 'width:34px;height:34px;border-radius:8px;font-size:12.5px;font-weight:bold;cursor:pointer;'+
+          (isCur ? 'border:2px solid var(--ink);background:#fff;color:var(--ink);' :
+           it.answered ? 'border:1px solid var(--teal);background:var(--teal);color:#fff;' :
+           'border:1px solid var(--line);background:#fff;color:var(--text);');
+        b.onclick = () => loadQuestion(it.index);
+        btnWrap.appendChild(b);
+      });
+      sec.appendChild(btnWrap);
+      grid.appendChild(sec);
+    });
+    navCard.appendChild(grid);
+  }
+  app.appendChild(navCard);
+}
+
+function tryFinish(){
+  const unanswered = cur.total - answeredCount();
+  if (unanswered === 0) { finishExam(); return; }
+  const confirmCard = el('div','card');
+  confirmCard.style.cssText = 'border:1px solid var(--orange)';
+  confirmCard.innerHTML = '<h3>'+unanswered+' question'+(unanswered===1?'':'s')+' unanswered</h3>'+
+    '<p class="muted">Unanswered questions count as incorrect. You can go back and finish them, or submit now.</p>';
+  const row = el('div','row'); row.style.marginTop='10px';
+  const goBackBtn = el('button','btn btn-ghost','Go Back');
+  goBackBtn.onclick = () => confirmCard.remove();
+  const submitAnywayBtn = el('button','btn btn-orange','Submit Anyway');
+  submitAnywayBtn.onclick = finishExam;
+  row.appendChild(goBackBtn); row.appendChild(submitAnywayBtn);
+  confirmCard.appendChild(row);
+  app.appendChild(confirmCard);
+  confirmCard.scrollIntoView({behavior:'smooth', block:'center'});
+}
+
+async function finishExam(){
+  clearInterval(timerHandle);
+  app.innerHTML = '<div class="card"><div class="spinner"></div><p class="muted" style="text-align:center">Finishing up\u2026</p></div>';
+  try { await api('/exam/finish', { method:'POST' }); }
+  catch (ex) {
+    app.innerHTML = '<div class="card"><h2>Could not finish</h2><p class="muted">'+esc(ex.message)+'</p>'+
+      '<button class="btn btn-primary" id="retryFinish">Try Again</button></div>';
+    document.getElementById('retryFinish').onclick = finishExam;
+    return;
+  }
+  location.href = '/results';
+}
+
+async function submitAnswer() {
+  const q = cur.question;
+  const errSlot = document.getElementById('examErr'); errSlot.classList.add('hidden');
+  if (q.type !== 'order' && selection.length === 0) {
+    errSlot.textContent = 'Pick an answer first.'; errSlot.classList.remove('hidden'); return;
+  }
+  if (q.type === 'multi' && selection.length !== q.selectCount) {
+    errSlot.textContent = 'Select exactly '+q.selectCount+' option(s) first.'; errSlot.classList.remove('hidden'); return;
+  }
+  const submitBtn = document.querySelector('button.btn-primary');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving\u2026'; }
+  let result;
+  try { result = await api('/exam/answer', { method:'POST', body:{ index: cur.index, given: selection } }); }
+  catch (ex) {
+    if (ex.status === 401) { location.href = '/'; return; }
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Submit Answer'; }
+    errSlot.textContent = 'Could not save that answer (' + ex.message + '). Please try again.';
+    errSlot.classList.remove('hidden');
+    return;
+  }
+  await refreshProgress();
+  // Reload this same question from the server: it will now come back with answered:true,
+  // and render() will show it in locked/review mode with Previous/Next/Navigator attached.
+  loadQuestion(cur.index);
+}
+
+(async () => {
+  await refreshProgress();
+  let startAt = 0;
+  try { const me = await api('/me'); if (Number.isInteger(me.curIndex)) startAt = Math.max(0, Math.min(me.curIndex, (me.totalQuestions||1)-1)); } catch (ex) {}
+  loadQuestion(startAt);
+})();
+</script>
+</body>
+</html>

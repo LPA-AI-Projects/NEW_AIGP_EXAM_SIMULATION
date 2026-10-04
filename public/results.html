@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your Results — AIGP Exam Simulation</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script src="/common.js"></script>
+<script>injectTopbar('AIGP Exam Simulation');</script>
+<div class="wrap-narrow" id="app"><div class="card"><div class="spinner"></div></div></div>
+<footer class="foot">Unofficial practice tool — Learners Point Academy — not affiliated with or endorsed by IAPP.</footer>
+<script>
+const DOMAIN_META = {
+  I:{short:'Domain I', name:'Foundations of AI Governance', cls:'dom-I', color:'#F2541D'},
+  II:{short:'Domain II', name:'Laws, Standards & Frameworks', cls:'dom-II', color:'#4F71F2'},
+  III:{short:'Domain III', name:'Governing AI Development', cls:'dom-III', color:'#2E9D91'},
+  IV:{short:'Domain IV', name:'Governing AI Deployment & Use', cls:'dom-IV', color:'#6B3FA0'}
+};
+async function load() {
+  const app = document.getElementById('app');
+  let me, r;
+  try { me = await api('/me'); } catch(ex){ if(ex.status===401) return location.href='/'; }
+  if (me.status === 'profile_set') return location.href = '/mode-select';
+  if (me.status !== 'completed') return location.href = '/exam';
+  try { r = await api('/exam/result'); } catch(ex){ app.innerHTML = '<div class="card">'+esc(ex.message)+'</div>'; return; }
+
+  function modeLabel() {
+    if (r.mode === 'domain') return 'Domain Practice \u2014 Domain '+r.domain;
+    if (r.mode === 'drill') return 'Quick Drill';
+    return 'Full Mock Exam';
+  }
+
+  let domRows = '';
+  ['I','II','III','IV'].forEach(d => {
+    const s = r.domStats[d]; if (!s.total) return;
+    const p = Math.round(s.correct/s.total*100);
+    domRows += '<tr><td><span class="badge-domain '+DOMAIN_META[d].cls+'">'+DOMAIN_META[d].short+'</span></td>'+
+      '<td class="muted small">'+DOMAIN_META[d].name+'</td>'+
+      '<td>'+s.correct+'/'+s.total+' ('+p+'%)</td>'+
+      '<td style="width:35%"><div class="barwrap"><div class="barfill" style="width:'+p+'%;background:'+DOMAIN_META[d].color+'"></div></div></td></tr>';
+  });
+
+  app.innerHTML =
+    '<div class="card" style="text-align:center">'+
+      '<h1>Simulation Complete</h1>'+
+      '<p class="muted">'+esc(me.name)+' \u2014 '+esc(me.email)+' \u2014 '+esc(modeLabel())+'</p>'+
+      '<div style="font-size:52px;font-weight:bold;color:var(--teal);margin:14px 0 4px">'+r.score+'/'+r.total+'</div>'+
+      '<div style="font-size:18px;color:var(--muted);margin-bottom:14px">'+r.pct+'%</div>'+
+      '<div class="badge-big" style="background:'+r.badge.color+'">'+r.badge.label+'</div>'+
+      '<p style="margin-top:16px;max-width:480px;margin-left:auto;margin-right:auto">'+esc(r.badge.remark)+'</p>'+
+    '</div>'+
+    '<div class="card"><h2>By domain</h2><table class="tbl">'+domRows+'</table></div>'+
+    '<div class="card">'+
+      '<div class="row">'+
+        '<a class="btn btn-primary" href="/review">Review My Answers'+((r.total-r.score)>0?' ('+(r.total-r.score)+' to revisit)':'')+'</a>'+
+        '<a class="btn btn-ghost" href="/api/exam/report.pdf">Download My Report (PDF)</a>'+
+        '<a class="btn btn-ghost" href="/mode-select">Start Another Practice Session</a>'+
+      '</div>'+
+      '<p class="muted small" style="margin-top:10px">Your report has also been emailed to '+esc(me.email)+'.</p>'+
+    '</div>';
+}
+load();
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Choose a Practice Mode — AIGP Exam Simulation</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<script src="/common.js"></script>
+<script>injectTopbar('AIGP Exam Simulation');</script>
+<div class="wrap" id="app">
+  <div class="card"><div class="spinner"></div></div>
+</div>
+<footer class="foot">Unofficial practice tool — Learners Point Academy — not affiliated with or endorsed by IAPP.</footer>
+<script>
+let chosenMode = 'full', chosenLen = 25, chosenDomain = 'I';
+let myName = '';
+
+function el(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!==undefined) e.innerHTML=html; return e; }
+
+async function load() {
+  let me;
+  try { me = await api('/me'); } catch (ex) { if (ex.status === 401) return location.href = '/'; }
+  myName = me.name || '';
+  if (me.status === 'in_progress' && (me.totalQuestions||0) > 0) return location.href = '/exam';
+  if (me.status === 'completed') return location.href = '/results';
+  render();
+}
+
+function render() {
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  const head = el('div','card');
+  head.innerHTML = '<h1>Welcome, '+esc(myName.split(' ')[0] || '')+'!</h1><p class="muted">Choose how you\u2019d like to practice. You start right away — no waiting on a trainer.</p>';
+  app.appendChild(head);
+
+  const modeCard = el('div','card');
+  modeCard.innerHTML = '<h2>Choose a practice mode</h2>';
+  const grid = el('div','grid grid-3');
+  const modes = [
+    {k:'full', ico:'⏱', title:'Full Mock Exam', desc:'Domain-weighted like the real exam. Choose 25, 50 or 100 questions.'},
+    {k:'domain', ico:'📚', title:'Domain Practice', desc:'Drill one of the four exam-blueprint domains at a time.'},
+    {k:'drill', ico:'⚡', title:'Quick Drill', desc:'A short, mixed warm-up set across all domains.'}
+  ];
+  modes.forEach(m => {
+    const c = el('div','card mode-card'+(m.k===chosenMode?' sel':''));
+    c.innerHTML = '<div class="ico">'+m.ico+'</div><h3>'+m.title+'</h3><p class="muted small">'+m.desc+'</p>';
+    c.onclick = () => { chosenMode = m.k; grid.querySelectorAll('.mode-card').forEach(x=>x.classList.remove('sel')); c.classList.add('sel'); renderOptions(); };
+    grid.appendChild(c);
+  });
+  modeCard.appendChild(grid);
+  const optsWrap = el('div');
+  modeCard.appendChild(optsWrap);
+
+  function renderOptions() {
+    optsWrap.innerHTML = '';
+    if (chosenMode === 'full') {
+      const row = el('div'); row.innerHTML = '<p class="muted" style="margin-top:14px">Length (questions drawn proportionally across all four domains):</p>';
+      const chips = el('div','row');
+      [25,50,100].forEach(n => {
+        const c = el('button','chip'+(n===chosenLen?' sel':''), n+' questions');
+        c.onclick = () => { chosenLen=n; chips.querySelectorAll('.chip').forEach(x=>x.classList.remove('sel')); c.classList.add('sel'); updateNote(); };
+        chips.appendChild(c);
+      });
+      row.appendChild(chips); optsWrap.appendChild(row);
+      const note = el('p','muted small'); optsWrap.appendChild(note);
+      function updateNote(){ note.innerHTML = 'About '+chosenLen+' questions, roughly '+Math.max(5,Math.round(chosenLen*1.2))+' minutes at a steady pace, self-paced — answer, see the explanation, move on.'; }
+      updateNote();
+    } else if (chosenMode === 'domain') {
+      const row2 = el('div'); row2.innerHTML = '<p class="muted" style="margin-top:14px">Domain:</p>';
+      const chips2 = el('div','row');
+      ['I','II','III','IV'].forEach(d => {
+        const c = el('button','chip'+(d===chosenDomain?' sel':''), 'Domain '+d);
+        c.onclick = () => { chosenDomain=d; chips2.querySelectorAll('.chip').forEach(x=>x.classList.remove('sel')); c.classList.add('sel'); };
+        chips2.appendChild(c);
+      });
+      row2.appendChild(chips2); optsWrap.appendChild(row2);
+      optsWrap.appendChild(el('p','muted small','Draws up to the full available pool for this domain, scenario clusters kept together.'));
+    } else {
+      optsWrap.appendChild(el('p','muted','25 mixed questions, about 30 minutes — a quick warm-up across all four domains.'));
+    }
+  }
+  renderOptions();
+
+  const startRow = el('div','row'); startRow.style.marginTop = '16px';
+  const startBtn = el('button','btn btn-primary','Start');
+  const startErr = el('p','error hidden');
+  startBtn.onclick = async () => {
+    startBtn.disabled = true; startBtn.textContent = 'Starting\u2026'; startErr.classList.add('hidden');
+    const body = { mode: chosenMode };
+    if (chosenMode === 'full') body.length = chosenLen;
+    if (chosenMode === 'domain') body.domain = chosenDomain;
+    try {
+      await api('/exam/start', { method: 'POST', body });
+      location.href = '/exam';
+    } catch (ex) {
+      startErr.textContent = ex.message; startErr.classList.remove('hidden'); startBtn.disabled = false; startBtn.textContent = 'Start';
+    }
+  };
+  startRow.appendChild(startBtn); modeCard.appendChild(startRow); modeCard.appendChild(startErr);
+  app.appendChild(modeCard);
+}
+
+load();
+</script>
+</body>
+</html>
